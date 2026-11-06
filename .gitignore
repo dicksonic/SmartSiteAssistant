@@ -1,0 +1,30 @@
+# 密钥和本地配置
+src/main/resources/app.properties
+src/main/resources/application.yml
+
+# 日志
+logs/
+*.log
+
+# Maven 构建产物
+target/
+
+# IDE
+.idea/
+*.iml
+
+# 系统垃圾
+Thumbs.db
+.DS_Store
+
+#模型
+models/
+
+#node
+node_modules/
+.npm-cache/
+dist/
+target/
+
+#rebel
+rebel.xml
