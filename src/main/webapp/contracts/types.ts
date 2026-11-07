@@ -2,7 +2,7 @@ export * from "./errors";
 
 // ============ 共享业务类型（前后端契约） ============
 
-export type ApiType = "text" | "vision" | "asr" | "tts";
+export type ApiType = "text" | "vision" | "asr" | "tts" | "agent";
 export type Scenario = "qa" | "hazard" | "material" | "compare";
 
 export const SCENARIO_LABELS: Record<Scenario, string> = {
@@ -17,6 +17,7 @@ export const API_TYPE_LABELS: Record<ApiType, string> = {
   vision: "视觉模型",
   asr: "语音识别",
   tts: "语音合成",
+  agent: "Agent（G-AIOS）",
 };
 
 // ---- 场景① 规范问答 ----

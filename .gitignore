@@ -1,6 +1,7 @@
 # 密钥和本地配置
 src/main/resources/app.properties
 src/main/resources/application.yml
+properties/app.properties
 
 # 日志
 logs/

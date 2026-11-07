@@ -36,6 +36,17 @@ import type {
 export type { CompareResult, HazardResult, MaterialReviewResult, SessionInfo, UsageDailyRow, UsageSummaryRow };
 export type QaResult = QaAnswer & { question: string; asrText: string | null; ttsText: string };
 
+export type AgentUsage = { promptTokens: number; completionTokens: number; totalTokens: number };
+/** mode=agent：成功；mode=normal-fallback：agent 失败降级（此时用量在 agentUsage） */
+export type QaAgentResult = QaResult & {
+  mode: "agent" | "normal-fallback";
+  degraded: boolean;
+  degradeReason?: string;
+  agentLatencyMs: number;
+  usage?: AgentUsage;
+  agentUsage?: AgentUsage;
+};
+
 // ---- 接口 ----
 export const api = {
   // 平台接入
@@ -47,6 +58,8 @@ export const api = {
   // 四场景
   ask: (input: { token: string; question?: string; audioBase64?: string }) =>
     post<QaResult>("/api/assistant/ask", input),
+  askAgent: (input: { token: string; question: string }) =>
+    post<QaAgentResult>("/api/assistant/askAgent", input),
   describeHazard: (input: {
     token: string;
     imageBase64?: string;

@@ -1,5 +1,6 @@
 package com.reg.assistant.controller;
 
+import com.reg.assistant.agent.service.AgentService;
 import com.reg.assistant.service.AssistantService;
 import org.springframework.web.bind.annotation.*;
 
@@ -13,8 +14,11 @@ public class AssistantController {
 
     private final AssistantService assistantService;
 
-    public AssistantController(AssistantService assistantService) {
+    private final AgentService agentService;
+
+    public AssistantController(AssistantService assistantService, AgentService agentService) {
         this.assistantService = assistantService;
+        this.agentService = agentService;
     }
 
     @PostMapping("/ask")
@@ -23,6 +27,14 @@ public class AssistantController {
                 (String) body.get("token"),
                 (String) body.get("question"),
                 (String) body.get("audioBase64"));
+    }
+
+    /** 场景① Agent 模式：G-AIOS ReAct 链路，与 /ask 平行，供前端同题对比 */
+    @PostMapping("/askAgent")
+    public Map<String, Object> askAgent(@RequestBody Map<String, Object> body) throws Exception {
+        return agentService.askAgent(
+                (String) body.get("token"),
+                (String) body.get("question"));
     }
 
     @PostMapping("/describeHazard")

@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+
+    <!-- traceId 无值时显示空串而非 "traceId" 字面量 -->
+    <property name="LOG_PATTERN"
+              value="%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%thread] [%X{traceId:-}] %logger{36} : %msg%n"/>
+
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder><pattern>${LOG_PATTERN}</pattern></encoder>
+    </appender>
+
+    <!--
+      滚动策略取值依据（政务单机部署经验值）：
+      - 按天切 + 单文件 50MB 切分：现场拷日志按天给，单文件过大编辑器打不开；
+      - maxHistory 30 天 + totalSizeCap 2GB：磁盘双保险，先到先清。
+      失效条件：接甲方日志平台（如 ELK）后文件保留期可缩短。
+      日志目录用相对路径 logs/，跟随工作目录约定（与 properties/app.properties 同级思路）。
+    -->
+    <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>logs/smartsite-ai.log</file>
+        <encoder><pattern>${LOG_PATTERN}</pattern></encoder>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <fileNamePattern>logs/smartsite-ai.%d{yyyy-MM-dd}.%i.log</fileNamePattern>
+            <maxFileSize>50MB</maxFileSize>
+            <maxHistory>30</maxHistory>
+            <totalSizeCap>2GB</totalSizeCap>
+        </rollingPolicy>
+    </appender>
+
+    <root level="INFO">
+        <appender-ref ref="CONSOLE"/>
+        <appender-ref ref="FILE"/>
+    </root>
+
+</configuration>

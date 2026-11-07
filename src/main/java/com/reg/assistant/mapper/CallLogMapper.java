@@ -28,7 +28,15 @@ public interface CallLogMapper {
             "FROM call_logs GROUP BY api_type, scenario, unit")
     List<Map<String, Object>> usageSummary();
 
-    @Select("SELECT DATE_FORMAT(created_at, '%Y-%m-%d') AS day, COUNT(*) AS callCount, SUM(usage_amount) AS totalUsage " +
+    /*@Select("SELECT DATE_FORMAT(created_at, '%Y-%m-%d') AS day, COUNT(*) AS callCount, SUM(usage_amount) AS totalUsage " +
             "FROM call_logs GROUP BY DATE_FORMAT(created_at, '%Y-%m-%d') ORDER BY day")
-    List<Map<String, Object>> usageDaily();
+    List<Map<String, Object>> usageDaily();*/
+
+    /**
+     * 按天统计的原始数据：日期分组放 Java 侧做。
+     * 原因：DATE_FORMAT 是 MySQL 方言（达梦/金仓用 to_char，格式串语义还有差），SQL 里一处方言都不能留。
+     * 失效条件：call_logs 量产到十万级后，改按时间范围过滤查询或建日汇总表。
+     */
+    @Select("SELECT created_at AS createdAt, usage_amount AS usageAmount FROM call_logs")
+    List<Map<String, Object>> findDailySource();
 }

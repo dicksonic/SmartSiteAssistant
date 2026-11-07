@@ -3,6 +3,7 @@ package com.reg.assistant.service;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.reg.assistant.agent.service.KnowledgeSearchService;
 import com.reg.assistant.auth.TokenService;
 import com.reg.assistant.common.ApiException;
 import com.reg.assistant.mapper.KnowledgeMapper;
@@ -25,16 +26,16 @@ public class AssistantService {
 
     private final TokenService tokenService;
     private final MeteredGateway gateway;
-    private final KnowledgeMapper knowledgeMapper;
     private final RecordsMapper recordsMapper;
     private final ObjectMapper om = new ObjectMapper();
+    private final KnowledgeSearchService knowledgeSearchService;
 
-    public AssistantService(TokenService tokenService, MeteredGateway gateway,
-                            KnowledgeMapper knowledgeMapper, RecordsMapper recordsMapper) {
+
+    public AssistantService(TokenService tokenService, MeteredGateway gateway, RecordsMapper recordsMapper,KnowledgeSearchService knowledgeSearchService) {
         this.tokenService = tokenService;
         this.gateway = gateway;
-        this.knowledgeMapper = knowledgeMapper;
         this.recordsMapper = recordsMapper;
+        this.knowledgeSearchService = knowledgeSearchService;
     }
 
     /** 场景① 规范条文问答 */
@@ -217,15 +218,19 @@ public class AssistantService {
 
     // ---------- 内部方法 ----------
 
-    /** 规范条文检索（预研版：关键词匹配；正式版替换为向量检索） */
+    /** 规范条文检索：E5 向量语义检索（M1-5），失败自动降级关键词 LIKE */
     private List<KnowledgeItem> retrieveKnowledge(String question) {
+        return knowledgeSearchService.search(question, 5);
+    }
+    /** 规范条文检索（预研版：关键词匹配；正式版替换为向量检索） */
+    /*private List<KnowledgeItem> retrieveKnowledge(String question) {
         List<String> keywords = new ArrayList<>();
         Matcher m = Pattern.compile("[\\u4e00-\\u9fa5]{2,}").matcher(question);
         while (m.find() && keywords.size() < 4) keywords.add(m.group());
         if (keywords.isEmpty()) return knowledgeMapper.findAll(5);
         List<KnowledgeItem> found = knowledgeMapper.searchByKeywords(keywords, 5);
         return found.isEmpty() ? knowledgeMapper.findAll(5) : found;
-    }
+    }*/
 
     /** 从模型输出中提取JSON（容错：模型可能包裹在markdown代码块中） */
     private ObjectNode extractJson(String raw) {
