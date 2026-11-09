@@ -1,9 +1,14 @@
 package com.reg.assistant.controller;
 
 import com.reg.assistant.agent.service.AgentService;
+import com.reg.assistant.hazard.service.HazardRecognizeService;
 import com.reg.assistant.service.AssistantService;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 
@@ -16,9 +21,12 @@ public class AssistantController {
 
     private final AgentService agentService;
 
-    public AssistantController(AssistantService assistantService, AgentService agentService) {
+    private final HazardRecognizeService hazardRecognizeService;
+
+    public AssistantController(AssistantService assistantService, AgentService agentService,HazardRecognizeService hazardRecognizeService) {
         this.assistantService = assistantService;
         this.agentService = agentService;
+        this.hazardRecognizeService = hazardRecognizeService;
     }
 
     @PostMapping("/ask")
@@ -72,5 +80,52 @@ public class AssistantController {
         return assistantService.synthesize(
                 (String) body.get("token"),
                 (String) body.get("text"));
+    }
+
+    /** 隐患识别（M2-2）：样本图片清单 */
+    @GetMapping("/hazardImages")
+    public Object hazardImages(@RequestParam String token) {
+        return hazardRecognizeService.listImages(token);
+    }
+
+    /** 隐患识别（M2-2）：预览图字节流（前端缩略图），复用 fetcher 的全部校验 */
+    @GetMapping("/hazardImage")
+    public ResponseEntity<byte[]> hazardImage(@RequestParam String token, @RequestParam String name) throws Exception {
+        Path p = hazardRecognizeService.imagePath(token, name);
+        String n = p.getFileName().toString().toLowerCase();
+        MediaType type = n.endsWith(".png") ? MediaType.IMAGE_PNG
+                : n.endsWith(".webp") ? MediaType.valueOf("image/webp") : MediaType.IMAGE_JPEG;
+        return ResponseEntity.ok().contentType(type).body(Files.readAllBytes(p));
+    }
+
+    /** 隐患识别（M2-2）：识别主链，返回待确认草稿 */
+    @PostMapping("/recognizeHazard")
+    public Map<String, Object> recognizeHazard(@RequestBody Map<String, Object> body) {
+        return hazardRecognizeService.recognize(
+                (String) body.get("token"),
+                (String) body.get("imageName"),
+                (String) body.get("location"));
+    }
+
+    /** 隐患识别（M2-2）：人工确认入库（可携带修正字段） */
+    @PostMapping("/confirmHazard")
+    public Map<String, Object> confirmHazard(@RequestBody Map<String, Object> body) {
+        return hazardRecognizeService.confirm(
+                (String) body.get("token"),
+                ((Number) body.get("hazardId")).longValue(),
+                (String) body.get("category"),
+                (String) body.get("location"),
+                (String) body.get("description"),
+                (String) body.get("rectification"),
+                (String) body.get("basis"));
+    }
+
+    /** 场景② 追问闭环（M2-3）：就某条隐患记录问 Agent（查条文/拟通知单/查台账） */
+    @PostMapping("/askHazardAgent")
+    public Map<String, Object> askHazardAgent(@RequestBody Map<String, Object> body) {
+        return agentService.askHazardAgent(
+                (String) body.get("token"),
+                ((Number) body.get("hazardId")).longValue(),
+                (String) body.get("question"));
     }
 }

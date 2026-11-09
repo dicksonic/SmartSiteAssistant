@@ -3,6 +3,9 @@ src/main/resources/app.properties
 src/main/resources/application.yml
 properties/app.properties
 
+#本地测试图片
+sample-images/
+
 # 日志
 logs/
 *.log

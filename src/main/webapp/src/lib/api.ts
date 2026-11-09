@@ -31,9 +31,12 @@ import type {
   SessionInfo,
   UsageDailyRow,
   UsageSummaryRow,
+  HazardDraft,
+  HazardImageItem,
+  HazardAgentAnswer,
 } from "@contracts/types";
 
-export type { CompareResult, HazardResult, MaterialReviewResult, SessionInfo, UsageDailyRow, UsageSummaryRow };
+export type { CompareResult, HazardResult, MaterialReviewResult, SessionInfo, UsageDailyRow, UsageSummaryRow,HazardDraft,HazardImageItem,HazardAgentAnswer };
 export type QaResult = QaAnswer & { question: string; asrText: string | null; ttsText: string };
 
 export type AgentUsage = { promptTokens: number; completionTokens: number; totalTokens: number };
@@ -82,6 +85,25 @@ export const api = {
   }) => post<CompareResult>("/api/assistant/compareRectification", input),
   synthesize: (input: { token: string; text: string }) =>
     post<{ audioBase64: string }>("/api/assistant/synthesize", input),
+  // 隐患图像识别（M2-2）
+  hazardImages: (token: string) =>
+    get<HazardImageItem[]>(`/api/assistant/hazardImages?token=${encodeURIComponent(token)}`),
+  /** 预览图 URL：直接给 <img src> 用，不走 request 封装（返回的是字节流不是 JSON） */
+  hazardImageUrl: (token: string, name: string) =>
+    `${BASE}/api/assistant/hazardImage?token=${encodeURIComponent(token)}&name=${encodeURIComponent(name)}`,
+  recognizeHazard: (input: { token: string; imageName: string; location?: string }) =>
+    post<HazardDraft>("/api/assistant/recognizeHazard", input),
+  confirmHazard: (input: {
+    token: string;
+    hazardId: number;
+    category: string;
+    location: string;
+    description: string;
+    rectification: string;
+    basis: string;
+  }) => post<{ id: number; status: string }>("/api/assistant/confirmHazard", input),
+  askHazardAgent: (input: { token: string; hazardId: number; question: string }) =>
+    post<HazardAgentAnswer>("/api/assistant/askHazardAgent", input),
 
   // 看板
   usageSummary: () => get<UsageSummaryRow[]>("/api/stats/usageSummary"),

@@ -80,3 +80,30 @@ export interface UsageDailyRow {
   callCount: number;
   totalUsage: number;
 }
+
+// ---- 场景② 隐患图像识别（M2-2）----
+export interface HazardImageItem {
+  name: string;
+  sizeKb: number;
+}
+
+/** 识别草稿：HazardResult 五字段 + 状态机/诊断信息 */
+export interface HazardDraft extends HazardResult {
+  id: number;
+  imageName: string;
+  confidence: string;
+  status: string;
+  latencyMs: number;
+  usage?: { promptTokens: number; completionTokens: number; totalTokens: number };
+}
+
+/** Agent 隐患追问（M2-3） */
+export interface HazardAgentAnswer {
+  hazardId: number;
+  hazardStatus: string;
+  question: string;
+  answer: string;
+  mode: string;
+  agentLatencyMs: number;
+  usage?: { promptTokens: number; completionTokens: number; totalTokens: number };
+}

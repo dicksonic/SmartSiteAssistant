@@ -8,6 +8,7 @@ import com.reg.assistant.auth.TokenService;
 import com.reg.assistant.common.ApiException;
 import com.reg.assistant.mapper.CallLogMapper;
 import com.reg.assistant.mapper.RecordsMapper;
+import com.reg.assistant.model.Entities.*;
 import com.reg.assistant.model.Entities.AssistantSession;
 import com.reg.assistant.service.AssistantService;
 import jakarta.annotation.PostConstruct;
@@ -60,6 +61,7 @@ public class AgentService {
     // call_logs 行标识：scenario 沿用 qa（同场景），apiType 区分链路，
     // usageSummary 按 apiType+scenario 分组，自然拆出 text vs agent 对比行
     private static final String SCENARIO = "qa";
+    private static final String SCENARIO_HAZARD = "hazard";
     private static final String API_TYPE = "agent";
     private static final String PROVIDER = "gaios";
     /** 模型名内核未暴露（DeepSeekCore 无 getter），先写常量；阶段2 内核加 getModelName() 后替换 */
@@ -168,7 +170,7 @@ public class AgentService {
         long latencyMs = System.currentTimeMillis() - start;
 
         if (outcome.error() == null && !isAgentFailure(outcome.answer())) {
-            logCall(session.getId(), outcome, latencyMs, true);
+            logCall(session.getId(), outcome, latencyMs, true,SCENARIO);
             // 与普通模式同形状留痕（answer/checklist/references），历史记录接口无需区分链路
             ObjectNode rec = om.createObjectNode();
             rec.put("answer", outcome.answer());
@@ -182,7 +184,7 @@ public class AgentService {
                 : "agent 未产出有效答案: " + outcome.answer();
         log.warn("[AgentService] agent 链路失败，原因：{}，耗时 {}ms，tokens={}",
                 reason, latencyMs, outcome.totalTokens());
-        logCall(session.getId(), outcome, latencyMs, false);
+        logCall(session.getId(), outcome, latencyMs, false,SCENARIO);
 
         if (!fallbackEnabled) {
             throw new ApiException("Agent 链路失败：" + reason);
@@ -195,6 +197,70 @@ public class AgentService {
         fallback.put("agentLatencyMs", latencyMs);
         fallback.put("agentUsage", usageMap(outcome));
         return fallback;
+    }
+
+    /**
+     * 场景② 追问闭环（M2-3）：带着隐患记录上下文进 Agent 循环。
+     * 与 askAgent 的差异：
+     * 1. 当前草稿由主链确定性注入 prompt——已知信息不值得烧一轮工具调用去取；
+     *    HazardDraftTool 留给"当前草稿之外"的检索（其他隐患/待确认清单）；
+     * 2. 不做降级兜底：ask 的降级是为了保 QA 同题对比演示不断流，
+     *    追问是新链路，诚实报错比静默换链路的"答案"更符合审计原则；
+     * 3. scenario=hazard 计量，与 QA 的 agent 行分列。
+     */
+    public Map<String, Object> askHazardAgent(String token, long hazardId, String question) {
+        if (!agentEnabled) {
+            throw new ApiException("Agent 模式未启用");
+        }
+        AssistantSession session = tokenService.requireSession(token);
+        if (question == null || question.isBlank()) {
+            throw new ApiException("请提供问题文本");
+        }
+        HazardDraft draft = recordsMapper.findHazardById(hazardId);
+        if (draft == null) {
+            throw new ApiException("隐患记录不存在: " + hazardId);
+        }
+
+        String enriched = "【隐患记录#" + draft.getId() + "（" + statusLabel(draft.getStatus()) + "）】\n"
+                + "分类：" + draft.getCategory()
+                + "\n部位：" + dash(draft.getLocation())
+                + "\n描述：" + draft.getDescription()
+                + "\n整改要求：" + dash(draft.getRectification())
+                + "\n依据：" + dash(draft.getBasis())
+                + "\n\n【安全员追问】" + question;
+
+        long start = System.currentTimeMillis();
+        AgentOutcome outcome = runWithBudget(enriched);
+        long latencyMs = System.currentTimeMillis() - start;
+
+        boolean success = outcome.error() == null && !isAgentFailure(outcome.answer());
+        logCall(session.getId(), outcome, latencyMs, success, SCENARIO_HAZARD);
+        if (!success) {
+            String reason = outcome.error() != null ? outcome.error() : "agent 未产出有效答案";
+            log.warn("[AgentService] 隐患追问失败 hazardId={}，原因：{}，耗时 {}ms", hazardId, reason, latencyMs);
+            throw new ApiException("Agent 追问失败：" + reason);
+        }
+
+        // 追问留痕进 qa_records（带隐患锚点前缀），历史记录接口无需新增表
+        recordsMapper.insertQa(session.getId(), "【隐患#" + hazardId + "】" + question, outcome.answer());
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("hazardId", hazardId);
+        result.put("hazardStatus", draft.getStatus());
+        result.put("question", question);
+        result.put("answer", outcome.answer());
+        result.put("mode", "agent");
+        result.put("agentLatencyMs", latencyMs);
+        result.put("usage", usageMap(outcome));
+        return result;
+    }
+
+    private static String statusLabel(String status) {
+        return "confirmed".equals(status) ? "已确认" : "待确认";
+    }
+
+    private static String dash(String s) {
+        return (s == null || s.isBlank()) ? "未填写" : s;
     }
 
     /** agent 单次执行结果：answer 与 error 二选一；usage 为本次请求累计真实 token */
@@ -253,9 +319,9 @@ public class AgentService {
     }
 
     /** 计量写库失败不阻断主流程（同 MeteredGateway 原则：计量是旁路） */
-    private void logCall(Long sessionId, AgentOutcome o, long latencyMs, boolean success) {
+    private void logCall(Long sessionId, AgentOutcome o, long latencyMs, boolean success, String scenario) {
         try {
-            callLogMapper.insert(sessionId, SCENARIO, API_TYPE, PROVIDER, MODEL,
+            callLogMapper.insert(sessionId, scenario, API_TYPE, PROVIDER, MODEL,
                     o.totalTokens() / 1000.0, "千tokens", latencyMs, success);
         } catch (Exception e) {
             log.warn("[AgentService] call_logs 写入失败: {}", e.getMessage());

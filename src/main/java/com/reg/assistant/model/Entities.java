@@ -84,4 +84,42 @@ public class Entities {
         public LocalDateTime getCreatedAt() { return createdAt; }
         public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
     }
+
+    /** 隐患识别草稿：唯一建实体的业务记录——识别链路需 useGeneratedKeys 回填 id 供前端确认状态机使用 */
+    public static class HazardDraft {
+        private Long id;
+        private Long sessionId;
+        private String inputMode;
+        private Boolean hasImage;
+        private String transcript;
+        private String category;
+        private String location;
+        private String description;
+        private String rectification;
+        private String basis;
+        private String status;
+
+        public Long getId() { return id; }
+        public void setId(Long id) { this.id = id; }
+        public Long getSessionId() { return sessionId; }
+        public void setSessionId(Long sessionId) { this.sessionId = sessionId; }
+        public String getInputMode() { return inputMode; }
+        public void setInputMode(String inputMode) { this.inputMode = inputMode; }
+        public Boolean getHasImage() { return hasImage; }
+        public void setHasImage(Boolean hasImage) { this.hasImage = hasImage; }
+        public String getTranscript() { return transcript; }
+        public void setTranscript(String transcript) { this.transcript = transcript; }
+        public String getCategory() { return category; }
+        public void setCategory(String category) { this.category = category; }
+        public String getLocation() { return location; }
+        public void setLocation(String location) { this.location = location; }
+        public String getDescription() { return description; }
+        public void setDescription(String description) { this.description = description; }
+        public String getRectification() { return rectification; }
+        public void setRectification(String rectification) { this.rectification = rectification; }
+        public String getBasis() { return basis; }
+        public void setBasis(String basis) { this.basis = basis; }
+        public String getStatus() { return status; }
+        public void setStatus(String status) { this.status = status; }
+    }
 }
