@@ -78,7 +78,7 @@ class AgentServiceTest {
     }
 
     private AgentService newService(boolean enabled, int maxTurns, long timeoutMs, boolean fallback) {
-        GaiosBootstrap.Components components = new GaiosBootstrap.Components(null, llm, registry);
+        GaiosBootstrap.Components components = new GaiosBootstrap.Components(null, llm, registry,null);
         AgentService svc = new AgentService(components, tokenService, assistantService,
                 callLogMapper, recordsMapper, enabled, maxTurns, timeoutMs, fallback);
         svc.attachUsageListener(); // llm 是 mock，走"非 DeepSeekCore"告警分支，计量按 0 记
