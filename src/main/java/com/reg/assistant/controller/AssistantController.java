@@ -2,11 +2,16 @@ package com.reg.assistant.controller;
 
 import com.reg.assistant.agent.service.AgentService;
 import com.reg.assistant.hazard.service.HazardRecognizeService;
+import com.reg.assistant.notice.service.NoticeService;
 import com.reg.assistant.service.AssistantService;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
@@ -23,10 +28,14 @@ public class AssistantController {
 
     private final HazardRecognizeService hazardRecognizeService;
 
-    public AssistantController(AssistantService assistantService, AgentService agentService,HazardRecognizeService hazardRecognizeService) {
+    private final NoticeService noticeService;
+
+    public AssistantController(AssistantService assistantService, AgentService agentService,
+                               HazardRecognizeService hazardRecognizeService, NoticeService noticeService) {
         this.assistantService = assistantService;
         this.agentService = agentService;
         this.hazardRecognizeService = hazardRecognizeService;
+        this.noticeService = noticeService;
     }
 
     @PostMapping("/ask")
@@ -127,5 +136,45 @@ public class AssistantController {
                 (String) body.get("token"),
                 ((Number) body.get("hazardId")).longValue(),
                 (String) body.get("question"));
+    }
+
+    // ---- 通知单模板化（M2-4）----
+
+    /** 模板清单（含槽位集合）：本地目录模拟平台模板配置模块 */
+    @GetMapping("/noticeTemplates")
+    public Object noticeTemplates(@RequestParam String token) {
+        return noticeService.listTemplates(token);
+    }
+
+    /** 填充：LLM 只产槽位 JSON（真实计量 scenario=hazard api_type=text provider=gaios） */
+    @PostMapping("/fillNotice")
+    public Map<String, Object> fillNotice(@RequestBody Map<String, Object> body) {
+        return noticeService.fill(
+                (String) body.get("token"),
+                ((Number) body.get("hazardId")).longValue(),
+                (String) body.get("templateName"));
+    }
+
+    /** 渲染：poi-tl 确定性替换，零 LLM 不计量，返回 docx 字节流下载 */
+    @PostMapping("/renderNotice")
+    @SuppressWarnings("unchecked")
+    public ResponseEntity<byte[]> renderNotice(@RequestBody Map<String, Object> body) {
+        NoticeService.RenderedDoc doc = noticeService.render(
+                (String) body.get("token"),
+                (String) body.get("templateName"),
+                (Map<String, String>) body.get("values"));
+        String encoded = URLEncoder.encode(doc.filename(), StandardCharsets.UTF_8).replace("+", "%20");
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename*=UTF-8''" + encoded)
+                .contentType(MediaType.parseMediaType(
+                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"))
+                .body(doc.content());
+    }
+
+    /** 办公人员上传模板：四防线（穿越/扩展名/大小/同名覆盖）在 provider 内 */
+    @PostMapping("/uploadNoticeTemplate")
+    public Map<String, Object> uploadNoticeTemplate(@RequestParam String token,
+                                                    @RequestParam("file") MultipartFile file) throws Exception {
+        return noticeService.upload(token, file.getOriginalFilename(), file.getBytes());
     }
 }

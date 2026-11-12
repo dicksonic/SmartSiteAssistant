@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { api, type QaResult } from "@/lib/api";
+import { api, type QaResult, type QaAgentResult } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";

@@ -7,7 +7,9 @@ import com.reg.assistant.agent.HazardDraftTool;
 import com.reg.assistant.agent.RegulationSearchTool;
 import com.reg.assistant.agent.service.KnowledgeSearchService;
 import com.reg.assistant.hazard.VisionCoreHolder;
+import com.dicksonic.gaios.llm.impl.DeepSeekCore;
 import com.reg.assistant.mapper.KnowledgeMapper;
+import com.reg.assistant.notice.TextCoreHolder;
 import com.reg.assistant.mapper.RecordsMapper;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -58,6 +60,22 @@ public class GaiosConfig {
      * 与 gaiosComponents fail-fast 的策略差异是有意的：G-AIOS 核心是全应用地基，
      * 起不来宁可不启动；视觉只是单场景增强，不该绑架启动。
      */
+    /**
+     * 通知单填充专用文本核心（M2-4）：独立 DeepSeekCore 实例，不复用 bootstrap 共享实例——
+     * setUsageListener 单槽语义，AgentService 已挂共享实例，通知单再挂会顶掉 Agent 计量。
+     * 缺 deepseek.api.key 时只降级通知单填充一个功能（与视觉同一策略，不绑架启动）。
+     */
+    @Bean
+    public TextCoreHolder textCoreHolder() {
+        String key = AppConfigUtil.getOrDefault("deepseek.api.key", "");
+        if (key.isBlank()) {
+            log.warn("[GaiosConfig] 未配置 deepseek.api.key，通知单模板填充功能降级不可用，其余功能不受影响");
+            return TextCoreHolder.unavailable();
+        }
+        log.info("[GaiosConfig] TextCore 装配完成（DeepSeek 独立实例，专供通知单填充）");
+        return TextCoreHolder.of(new DeepSeekCore());
+    }
+
     @Bean
     public VisionCoreHolder visionCoreHolder() {
         String key = AppConfigUtil.getOrDefault("vision.api.key", "");

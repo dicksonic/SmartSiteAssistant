@@ -73,6 +73,12 @@
       <groupId>org.springframework.ai</groupId>
       <artifactId>spring-ai-starter-model-deepseek</artifactId>
     </dependency>
+    <!-- 通知单模板渲染（M2-4）：poi-tl 传递引入 POI 5.2.x，Boot 不管 POI 版本 -->
+    <dependency>
+      <groupId>com.deepoove</groupId>
+      <artifactId>poi-tl</artifactId>
+      <version>1.12.2</version>
+    </dependency>
     <!-- log4j-api → slf4j 桥（版本由 Spring Boot 统一管理，不用写） -->
     <dependency>
       <groupId>org.apache.logging.log4j</groupId>

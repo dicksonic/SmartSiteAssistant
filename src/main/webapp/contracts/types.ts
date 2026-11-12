@@ -107,3 +107,17 @@ export interface HazardAgentAnswer {
   agentLatencyMs: number;
   usage?: { promptTokens: number; completionTokens: number; totalTokens: number };
 }
+
+// ---- 通知单模板化（M2-4）----
+export interface NoticeTemplateItem {
+  name: string;
+  sizeKb: number;
+  slots: string[];
+}
+export interface NoticeFillResult {
+  templateName: string;
+  slots: string[];
+  values: Record<string, string>;
+  latencyMs: number;
+  usage?: { promptTokens: number; completionTokens: number; totalTokens: number };
+}

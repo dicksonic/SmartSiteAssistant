@@ -34,9 +34,11 @@ import type {
   HazardDraft,
   HazardImageItem,
   HazardAgentAnswer,
+  NoticeTemplateItem,
+  NoticeFillResult,
 } from "@contracts/types";
 
-export type { CompareResult, HazardResult, MaterialReviewResult, SessionInfo, UsageDailyRow, UsageSummaryRow,HazardDraft,HazardImageItem,HazardAgentAnswer };
+export type { CompareResult, HazardResult, MaterialReviewResult, SessionInfo, UsageDailyRow, UsageSummaryRow,HazardDraft,HazardImageItem,HazardAgentAnswer,NoticeTemplateItem,NoticeFillResult };
 export type QaResult = QaAnswer & { question: string; asrText: string | null; ttsText: string };
 
 export type AgentUsage = { promptTokens: number; completionTokens: number; totalTokens: number };
@@ -104,6 +106,37 @@ export const api = {
   }) => post<{ id: number; status: string }>("/api/assistant/confirmHazard", input),
   askHazardAgent: (input: { token: string; hazardId: number; question: string }) =>
     post<HazardAgentAnswer>("/api/assistant/askHazardAgent", input),
+
+  // 通知单模板化（M2-4）
+  noticeTemplates: (token: string) =>
+    get<NoticeTemplateItem[]>(`/api/assistant/noticeTemplates?token=${encodeURIComponent(token)}`),
+  fillNotice: (input: { token: string; hazardId: number; templateName: string }) =>
+    post<NoticeFillResult>("/api/assistant/fillNotice", input),
+  /** 渲染下载：返回 Blob，不走 request 封装（字节流不是 JSON） */
+  renderNotice: async (input: { token: string; templateName: string; values: Record<string, string> }) => {
+    const res = await fetch(`${BASE}/api/assistant/renderNotice`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    });
+    if (!res.ok) {
+      const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+      throw new Error((data.error as string) ?? `渲染失败(${res.status})`);
+    }
+    return res.blob();
+  },
+  /** 办公人员上传模板：multipart，同名覆盖 */
+  uploadNoticeTemplate: async (token: string, file: File) => {
+    const form = new FormData();
+    form.append("token", token);
+    form.append("file", file);
+    const res = await fetch(`${BASE}/api/assistant/uploadNoticeTemplate`, { method: "POST", body: form });
+    const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+    if (!res.ok) {
+      throw new Error((data.error as string) ?? `上传失败(${res.status})`);
+    }
+    return data as { name: string; sizeKb: number };
+  },
 
   // 看板
   usageSummary: () => get<UsageSummaryRow[]>("/api/stats/usageSummary"),
