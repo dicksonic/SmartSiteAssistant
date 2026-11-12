@@ -7,7 +7,7 @@
   <parent>
     <groupId>org.springframework.boot</groupId>
     <artifactId>spring-boot-starter-parent</artifactId>
-    <version>3.4.5</version>
+    <version>4.1.2</version>
     <relativePath/>
   </parent>
 
@@ -22,7 +22,18 @@
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
   </properties>
-
+  <dependencyManagement>
+    <dependencies>
+      <!-- Spring AI 版本仲裁：与 G-AIOS 父 pom 同一基线，钉 2.0.2 防 churn -->
+      <dependency>
+        <groupId>org.springframework.ai</groupId>
+        <artifactId>spring-ai-bom</artifactId>
+        <version>2.0.2</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
   <dependencies>
     <dependency>
       <groupId>org.springframework.boot</groupId>
@@ -31,7 +42,7 @@
     <dependency>
       <groupId>org.mybatis.spring.boot</groupId>
       <artifactId>mybatis-spring-boot-starter</artifactId>
-      <version>3.0.4</version>
+      <version>4.1.0</version>
     </dependency>
     <dependency>
       <groupId>com.mysql</groupId>
@@ -51,6 +62,17 @@
         </exclusion>
       </exclusions>
     </dependency>
+    <!-- G-AIOS 安检链自动装配（M2-7 真机验证）：引依赖即生效 -->
+    <dependency>
+      <groupId>com.dicksonic</groupId>
+      <artifactId>gaios-spring-ai-scanner</artifactId>
+      <version>0.1</version>
+    </dependency>
+    <!-- DeepSeek ChatModel：Stage III 仲裁复用宿主通道（无 ChatModel 启动 fail-fast） -->
+    <dependency>
+      <groupId>org.springframework.ai</groupId>
+      <artifactId>spring-ai-starter-model-deepseek</artifactId>
+    </dependency>
     <!-- log4j-api → slf4j 桥（版本由 Spring Boot 统一管理，不用写） -->
     <dependency>
       <groupId>org.apache.logging.log4j</groupId>
@@ -67,9 +89,10 @@
       <artifactId>spring-boot-starter-actuator</artifactId>
     </dependency>
     <!-- Flyway 版本化迁移：10.x 起 MySQL 支持拆成独立模块，两个都要 -->
+    <!-- 3. Flyway：flyway-core 换成 starter，flyway-mysql 保留不动 -->
     <dependency>
-      <groupId>org.flywaydb</groupId>
-      <artifactId>flyway-core</artifactId>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-flyway</artifactId>
     </dependency>
     <dependency>
       <groupId>org.flywaydb</groupId>

@@ -2,9 +2,9 @@ package com.reg.assistant.hazard.service;
 
 import com.dicksonic.gaios.llm.vision.impl.QwenVLCore;
 import com.dicksonic.gaios.llm.vision.VisionRequest;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ObjectNode;
 import com.reg.assistant.auth.TokenService;
 import com.reg.assistant.common.ApiException;
 import com.reg.assistant.hazard.HazardImageFetcher;

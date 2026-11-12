@@ -1,7 +1,7 @@
 package com.reg.assistant.agent;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 import com.reg.assistant.agent.service.KnowledgeSearchService;
 import com.reg.assistant.mapper.KnowledgeMapper;
 import com.reg.assistant.model.Entities.KnowledgeItem;
