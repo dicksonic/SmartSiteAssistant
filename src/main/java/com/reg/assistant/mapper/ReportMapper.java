@@ -225,4 +225,45 @@ public interface ReportMapper {
      */
     @Delete("DELETE FROM report_insights WHERE instance_id=#{instanceId} AND insight_type='missing'")
     int deleteMissingInsightsByInstance(@Param("instanceId") long instanceId);
+
+    // ==================== M3-4 长文生成（report_sections） ====================
+
+    /**
+     * 落一条报告章节。靠 uk(instance_id, section_code) 防同实例同节重复。
+     *
+     * @param row 章节行（instanceId/sectionCode/title/seq/content/refsJson）
+     * @return 影响行数（恒 1）
+     */
+    @Insert("INSERT INTO report_sections(instance_id, section_code, title, seq, content, refs_json) " +
+            "VALUES(#{instanceId}, #{sectionCode}, #{title}, #{seq}, #{content}, #{refsJson})")
+    int insertSection(Map<String, Object> row);
+
+    /**
+     * 重新生成的清场半步：删掉该实例上次生成留下的全部章节（本次全部章节生成完毕后才会再插入）。
+     *
+     * @param instanceId 实例 id
+     * @return 删除行数
+     */
+    @Delete("DELETE FROM report_sections WHERE instance_id=#{instanceId}")
+    int deleteSectionsByInstance(@Param("instanceId") long instanceId);
+
+    /**
+     * 实例章节列表（前端预览 / M3-5 渲染导出的数据源）。
+     *
+     * @param instanceId 实例 id
+     * @return 章节行列表，按 seq 升序（= 报告阅读顺序）
+     */
+    @Select("SELECT id, instance_id AS instanceId, section_code AS sectionCode, title, seq, content, " +
+            "refs_json AS refsJson, created_at AS createdAt, updated_at AS updatedAt " +
+            "FROM report_sections WHERE instance_id=#{instanceId} ORDER BY seq")
+    List<Map<String, Object>> listSectionsByInstance(@Param("instanceId") long instanceId);
+
+    /**
+     * 重新生成清场：只清 summary 型（M3-4 自产），不动 M3-3 取数阶段产的 missing 型。
+     *
+     * @param instanceId 实例 id
+     * @return 删除行数
+     */
+    @Delete("DELETE FROM report_insights WHERE instance_id=#{instanceId} AND insight_type='summary'")
+    int deleteSummaryInsightsByInstance(@Param("instanceId") long instanceId);
 }

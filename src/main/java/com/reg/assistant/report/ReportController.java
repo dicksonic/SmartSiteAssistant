@@ -1,5 +1,6 @@
 package com.reg.assistant.report;
 
+import com.reg.assistant.report.service.ReportGenerateService;
 import com.reg.assistant.report.service.ReportService;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
@@ -14,9 +15,11 @@ import java.util.Map;
 public class ReportController {
 
     private final ReportService reportService;
+    private final ReportGenerateService reportGenerateService;
 
-    public ReportController(ReportService reportService) {
+    public ReportController(ReportService reportService, ReportGenerateService reportGenerateService) {
         this.reportService = reportService;
+        this.reportGenerateService = reportGenerateService;
     }
 
     @GetMapping("/templates")
@@ -122,5 +125,23 @@ public class ReportController {
     @GetMapping("/instances/{id}/blocks")
     public Object blocks(@RequestParam String token, @PathVariable long id) {
         return reportService.listBlocks(token, id);
+    }
+
+    // ==================== M3-4 长文生成（复用 D6 压缩） ====================
+    // 取数（start）与生成（generate）解耦：preview 状态先预览数据，再触发生成，可反复重新生成。
+
+    /**
+     * 长文生成：POST /api/report/instances/{id}/generate，body: {token}
+     * preview/failed → generating → preview；→ {id, status, sections, insights, compressed, latencyMs, usage}
+     */
+    @PostMapping("/instances/{id}/generate")
+    public Object generate(@RequestBody Map<String, Object> body, @PathVariable long id) {
+        return reportGenerateService.generate((String) body.get("token"), id);
+    }
+
+    /** 实例章节列表（前端预览/M3-5 渲染数据源）：GET /api/report/instances/{id}/sections?token=xx → {id, sections} */
+    @GetMapping("/instances/{id}/sections")
+    public Object sections(@RequestParam String token, @PathVariable long id) {
+        return reportGenerateService.listSections(token, id);
     }
 }

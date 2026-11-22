@@ -10,6 +10,7 @@ import com.reg.assistant.hazard.VisionCoreHolder;
 import com.dicksonic.gaios.llm.impl.DeepSeekCore;
 import com.reg.assistant.mapper.KnowledgeMapper;
 import com.reg.assistant.notice.TextCoreHolder;
+import com.reg.assistant.report.ReportCoreHolder;
 import com.reg.assistant.mapper.RecordsMapper;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -74,6 +75,22 @@ public class GaiosConfig {
         }
         log.info("[GaiosConfig] TextCore 装配完成（DeepSeek 独立实例，专供通知单填充）");
         return TextCoreHolder.of(new DeepSeekCore());
+    }
+
+    /**
+     * 报告长文生成专用文本核心（M3-4）：再开一个独立 DeepSeekCore 实例——
+     * setUsageListener 单槽语义，共享实例与 TextCoreHolder 已分别被 AgentService / NoticeService 占用。
+     * 缺 deepseek.api.key 时只降级报告长文生成一个功能（与视觉/通知单同一策略，不绑架启动）。
+     */
+    @Bean
+    public ReportCoreHolder reportCoreHolder() {
+        String key = AppConfigUtil.getOrDefault("deepseek.api.key", "");
+        if (key.isBlank()) {
+            log.warn("[GaiosConfig] 未配置 deepseek.api.key，报告长文生成功能降级不可用，其余功能不受影响");
+            return ReportCoreHolder.unavailable();
+        }
+        log.info("[GaiosConfig] ReportCore 装配完成（DeepSeek 独立实例，专供报告长文生成）");
+        return ReportCoreHolder.of(new DeepSeekCore());
     }
 
     @Bean
