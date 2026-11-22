@@ -4,6 +4,9 @@ import com.reg.assistant.auth.TokenService;
 import com.reg.assistant.common.ApiException;
 import com.reg.assistant.mapper.ReportMapper;
 import com.reg.assistant.model.Entities.AssistantSession;
+import com.reg.assistant.report.provider.ReportDataProvider;
+import com.reg.assistant.report.provider.ReportRule;
+import com.reg.assistant.report.provider.ReportRuleRegistry;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
@@ -37,8 +40,16 @@ public class ReportService {
 
     private final ReportCandidateExtractor reportCandidateExtractor;
 
+    // M3-3 指标取数绑定
+    private final ReportRuleRegistry ruleRegistry;
+    private final ReportDataProvider dataProvider;
 
-    public ReportService(TokenService tokenService, ReportMapper reportMapper, ReportStatusMachine statusMachine,ReportTemplateParser reportTemplateParser,@Value("${app.report.upload-dir:data/report-uploads}") String uploadDir,@Value("${app.report.max-size-mb:20}") long maxSizeMb,ReportCandidateExtractor reportCandidateExtractor) {
+    /** 单指标取数行数上限。取值依据：分类/场景维度真实基数 < 50，500 留 10 倍余量防异常维度爆炸拖垮内存；失效条件：出现高基数维度规则时上调或改分页 */
+    private static final int DEFAULT_MAX_ROWS = 500;
+    /** 取数超时契约值（毫秒）。本地 SQL 同步执行实际用不上，按契约字段透传；异步化（D8）落地时生效 */
+    private static final long DEFAULT_QUERY_TIMEOUT_MS = 5000;
+
+    public ReportService(TokenService tokenService, ReportMapper reportMapper, ReportStatusMachine statusMachine,ReportTemplateParser reportTemplateParser,@Value("${app.report.upload-dir:data/report-uploads}") String uploadDir,@Value("${app.report.max-size-mb:20}") long maxSizeMb,ReportCandidateExtractor reportCandidateExtractor,ReportRuleRegistry ruleRegistry,ReportDataProvider dataProvider) {
         this.tokenService = tokenService;
         this.reportMapper = reportMapper;
         this.statusMachine = statusMachine;
@@ -46,6 +57,8 @@ public class ReportService {
         this.uploadDir = uploadDir;
         this.maxSizeMb = maxSizeMb;
         this.reportCandidateExtractor = reportCandidateExtractor;
+        this.ruleRegistry = ruleRegistry;
+        this.dataProvider = dataProvider;
     }
 
     public List<Map<String, Object>> listTemplates(String token) {
@@ -79,7 +92,27 @@ public class ReportService {
         return getInstance(token, ((Number) row.get("id")).longValue());
     }
 
-    /** M3-0 占位：不接真实生成任务，start 直接把 draft 推到 preview，验证状态机/幂等/守卫。 */
+    /**
+     * 启动报告生成（M3-3 真取数版）：draft/failed → generating → preview。
+     * <p>
+     * 数据流：实例参数（params_json 的 orgScope/timeFrom/timeTo）+ 模板可用指标集（confirmed/locked）
+     * → 逐指标按 ruleCode 经 ReportDataProvider 取数 → DataBlock 落 report_data_blocks
+     * → 本次用到的 confirmed 指标"取数即锁"（locked，防后续整体替换冲掉已取数定义）
+     * → 状态推 preview。未绑定规则的指标不算失败：跳过 + 落 missing insight + unbound 清单返回。
+     * <p>
+     * 幂等与失败语义：
+     * <ul>
+     *   <li>preview 状态重复 start 直接返回（既有幂等口径）</li>
+     *   <li>先全部取数（只读）再统一落库：provider 异常时不会留下半截数据块</li>
+     *   <li>failed 可重试：每次尝试落库前先清该实例旧数据块与旧 missing insight，不产生重复行</li>
+     *   <li>取数/落库异常 → generating→failed + error 落列（截 500 字符），原异常上抛</li>
+     *   <li>取数是同步的（本地 SQL 毫秒级）；异步生成任务列 D8</li>
+     * </ul>
+     *
+     * @param token 免登 token
+     * @param id    实例 id
+     * @return 实例行 + blocks（数据块数）+ unboundMetrics（未绑定规则跳过的指标清单）
+     */
     public Map<String, Object> start(String token, long id) {
         tokenService.requireSession(token);
         Map<String, Object> inst = requireInstance(id);
@@ -87,12 +120,97 @@ public class ReportService {
         if (ReportStatusMachine.PREVIEW.equals(status)) {
             return inst; // 幂等：重复 start 不报错
         }
-        String to = statusMachine.placeholderTargetOnStart(status);
-        int n = reportMapper.transitionInstance(id, status, to);
+        statusMachine.assertTransition(status, ReportStatusMachine.GENERATING);
+
+        Long templateId = inst.get("templateId") == null ? null : ((Number) inst.get("templateId")).longValue();
+        if (templateId == null) throw new ApiException("报告实例未关联模板，无法取数: " + id);
+        Map<String, Object> t = reportMapper.findTemplateById(templateId);
+        if (t == null) throw new ApiException(404, "报告模板不存在: " + templateId);
+        if (!"confirmed".equals(t.get("status"))) {
+            throw new ApiException("模板未完成指标确认（当前状态 " + t.get("status") + "），请先走确认闸门");
+        }
+        List<Map<String, Object>> usable = reportMapper.listUsableMetricsByTemplate(templateId);
+        if (usable.isEmpty()) throw new ApiException("模板无可用指标（confirmed/locked），无法取数");
+
+        int n = reportMapper.transitionInstance(id, status, ReportStatusMachine.GENERATING);
         if (n != 1) {
             throw new ApiException("报告状态已变化，请刷新后重试");
         }
-        return getInstance(token, id);
+
+        List<String> unbound = new ArrayList<>();
+        try {
+            String paramsJson = (String) inst.get("paramsJson");
+            Map<String, Object> params = (paramsJson == null || paramsJson.isBlank()) ? Map.of() : readSpec(paramsJson);
+            String orgScope = str(params.get("orgScope"));
+            if (orgScope.isBlank()) orgScope = "default";
+            String timeRange = buildTimeRange(params);
+
+            List<Map<String, Object>> blockRows = new ArrayList<>();
+            List<Long> usedConfirmedMetricIds = new ArrayList<>();
+            for (Map<String, Object> metric : usable) {
+                String metricCode = (String) metric.get("metricCode");
+                String ruleCode = (String) metric.get("ruleCode");
+                if (ruleCode == null || ruleCode.isBlank()) {
+                    unbound.add(metricCode + "(" + metric.get("metricName") + ")");
+                    continue;
+                }
+                ReportDataProvider.DataQuery q = new ReportDataProvider.DataQuery(
+                        metricCode, ruleCode, (String) metric.get("ruleVersion"),
+                        params, orgScope, timeRange, DEFAULT_MAX_ROWS, DEFAULT_QUERY_TIMEOUT_MS);
+                ReportDataProvider.DataBlock block = dataProvider.query(q);
+                Map<String, Object> row = new LinkedHashMap<>();
+                row.put("instanceId", id);
+                row.put("blockId", block.blockId());
+                row.put("metricCode", block.metricCode());
+                row.put("columnsJson", writeJson(block.columns()));
+                row.put("rowsJson", writeJson(block.rows()));
+                row.put("metaJson", writeJson(block.meta()));
+                row.put("hash", block.hash());
+                blockRows.add(row);
+                if ("confirmed".equals(metric.get("status"))) {
+                    usedConfirmedMetricIds.add(((Number) metric.get("id")).longValue());
+                }
+            }
+
+            // 取数全部成功才动库：清场（failed 重试幂等）→ 落块 → 落 missing → 取数即锁 → 推 preview
+            reportMapper.deleteDataBlocksByInstance(id);
+            reportMapper.deleteMissingInsightsByInstance(id);
+            for (Map<String, Object> row : blockRows) {
+                reportMapper.insertDataBlock(row);
+            }
+            for (String u : unbound) {
+                Map<String, Object> insight = new LinkedHashMap<>();
+                insight.put("instanceId", id);
+                insight.put("insightType", "missing");
+                insight.put("text", "指标未绑定取数规则，本期无数据: " + u);
+                insight.put("refsJson", writeJson(Map.of("metric", u)));
+                insight.put("severity", "warn");
+                reportMapper.insertInsight(insight);
+            }
+            if (!usedConfirmedMetricIds.isEmpty()) {
+                reportMapper.lockConfirmedMetricsByIds(usedConfirmedMetricIds);
+            }
+            int m = reportMapper.transitionInstance(id, ReportStatusMachine.GENERATING, ReportStatusMachine.PREVIEW);
+            if (m != 1) throw new ApiException("报告状态已变化，请刷新后重试");
+        } catch (RuntimeException e) {
+            String msg = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
+            reportMapper.transitionInstanceWithError(id, ReportStatusMachine.GENERATING,
+                    ReportStatusMachine.FAILED, msg.length() > 500 ? msg.substring(0, 500) : msg);
+            throw e;
+        }
+
+        Map<String, Object> result = new LinkedHashMap<>(getInstance(token, id));
+        result.put("blocks", reportMapper.listDataBlocksByInstance(id).size());
+        result.put("unboundMetrics", unbound);
+        return result;
+    }
+
+    /** 实例参数 → 契约 timeRange 字符串；timeFrom/timeTo 均缺省时 "all"（格式校验在 Provider 解析时做） */
+    private String buildTimeRange(Map<String, Object> params) {
+        String from = str(params.get("timeFrom"));
+        String to = str(params.get("timeTo"));
+        if (from.isBlank() && to.isBlank()) return "all";
+        return (from.isBlank() ? "..." : from) + "~" + (to.isBlank() ? "..." : to);
     }
 
     public Map<String, Object> getInstance(String token, long id) {
@@ -106,7 +224,24 @@ public class ReportService {
         return inst;
     }
 
-    private String writeJson(Map<String, Object> v) {
+    /** 取数规则目录（M3-3，指标绑定下拉的数据源）：公开全部白名单规则 */
+    public List<ReportRule> listRules(String token) {
+        tokenService.requireSession(token);
+        return ruleRegistry.list();
+    }
+
+    /** 实例数据块列表（M3-3，取数结果预览 / M3-4 长文生成与 M3-5 渲染的读入口） */
+    public Map<String, Object> listBlocks(String token, long instanceId) {
+        tokenService.requireSession(token);
+        requireInstance(instanceId);
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("id", instanceId);
+        result.put("blocks", reportMapper.listDataBlocksByInstance(instanceId));
+        return result;
+    }
+
+    /** 统一 JSON 序列化出口（M3-3 起入参放宽到 Object：数据块的 columns/rows 是 List） */
+    private String writeJson(Object v) {
         try {
             return om.writeValueAsString(v);
         } catch (Exception e) {
@@ -280,7 +415,8 @@ public class ReportService {
      * <ul>
      *   <li>metricCode 缺省时服务端生成（M%03d，按模板内全状态最大序号接续，避开 deprecated 留痕行的 uk 占用）</li>
      *   <li>origin 由服务端按候选来源映射（paragraph/table→extracted，其余→custom），不信客户端传值</li>
-     *   <li>删旧只删 draft/confirmed 行：deprecated 留痕行与 locked 行（M3-3 取数绑定后启用）不动</li>
+     *   <li>ruleCode 可选：非空必须命中取数规则白名单（M3-3），ruleVersion 由注册表权威写入</li>
+     *   <li>删旧只删 draft/confirmed 行：deprecated 留痕行与 locked 行（M3-3 取数即锁后启用）不动</li>
      *   <li>撞 uk(template_id, metric_code, version) → 409，事务回滚不留半截</li>
      * </ul>
      *
@@ -397,7 +533,7 @@ public class ReportService {
      *
      * @param templateId 模板 id
      * @param version    指标版本（取模板当前 version）
-     * @param m          入参行：metricCode/metricName/unit/dimension/section/subsection/suggestedChart/source/confidence/matchedText/...
+     * @param m          入参行：metricCode/metricName/unit/ruleCode?/dimension/section/subsection/suggestedChart/source/confidence/matchedText/...
      * @param seen       请求体内编码查重集（调用方持有，逐行 add）
      * @param nextSeq    自动编码序号游标（单元素数组当可变引用用，调用方持有）
      * @return 可直接 insertMetric 的行（status 恒 draft）
@@ -425,6 +561,14 @@ public class ReportService {
             throw new ApiException("非法图型: " + chart + "（允许: " + CHART_TYPES + "）");
         }
 
+        // M3-3 取数绑定：ruleCode 可选，非空必须命中白名单注册表（fail-closed）；
+        // ruleVersion 由注册表权威写入（不信客户端传值，口径变更靠版本钉定显式打断旧绑定）
+        String ruleCode = str(m.get("ruleCode"));
+        String ruleVersion = null;
+        if (!ruleCode.isBlank()) {
+            ruleVersion = ruleRegistry.require(ruleCode).version();
+        }
+
         String source = str(m.get("source"));
         String origin = ("paragraph".equals(source) || "table".equals(source)) ? "extracted" : "custom";
 
@@ -448,6 +592,8 @@ public class ReportService {
         row.put("origin", origin);
         row.put("status", "draft");
         row.put("version", version);
+        row.put("ruleCode", ruleCode.isBlank() ? null : ruleCode);
+        row.put("ruleVersion", ruleVersion);
         row.put("specJson", writeJson(spec));
         return row;
     }

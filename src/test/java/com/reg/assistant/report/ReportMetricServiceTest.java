@@ -4,6 +4,8 @@ import com.reg.assistant.auth.TokenService;
 import com.reg.assistant.common.ApiException;
 import com.reg.assistant.mapper.ReportMapper;
 import com.reg.assistant.model.Entities.AssistantSession;
+import com.reg.assistant.report.provider.ReportDataProvider;
+import com.reg.assistant.report.provider.ReportRuleRegistry;
 import com.reg.assistant.report.service.ReportCandidateExtractor;
 import com.reg.assistant.report.service.ReportService;
 import com.reg.assistant.report.service.ReportStatusMachine;
@@ -50,7 +52,7 @@ class ReportMetricServiceTest {
         when(tokenService.requireSession(anyString())).thenReturn(session);
         service = new ReportService(tokenService, reportMapper, new ReportStatusMachine(),
                 mock(ReportTemplateParser.class), "data/report-uploads", 20,
-                mock(ReportCandidateExtractor.class));
+                mock(ReportCandidateExtractor.class), new ReportRuleRegistry(), mock(ReportDataProvider.class));
     }
 
     private Map<String, Object> template(String status) {

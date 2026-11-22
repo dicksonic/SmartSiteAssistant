@@ -8,8 +8,9 @@ import java.util.Set;
 
 /**
  * 报告实例状态机。
- * M3-0 占位：start 先走 draft -> generating -> preview；后续 M3-3/M3-5 接入真实取数/成文后，
- * generating 到 preview 由生成任务完成，不在请求线程同步跳转。
+ * M3-3 起 start 同步完成真取数：draft/failed → generating → preview 在同一请求内顺序流转，
+ * 每步守卫压 SQL（本地 SQL 毫秒级，用户拍板同步）；将来取数异步化（D8）时，
+ * generating → preview 改由生成任务完成，不在请求线程同步跳转。
  */
 @Component
 public class ReportStatusMachine {
@@ -35,11 +36,5 @@ public class ReportStatusMachine {
         if (from == null || to == null || !ALLOWED.getOrDefault(from, Set.of()).contains(to)) {
             throw new ApiException("报告状态不允许流转: " + from + " -> " + to);
         }
-    }
-
-    /** M3-0 占位：生成任务未接入，start 直接到 preview，验证状态机与落库。 */
-    public String placeholderTargetOnStart(String from) {
-        assertTransition(from, GENERATING);
-        return PREVIEW;
     }
 }

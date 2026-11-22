@@ -52,7 +52,7 @@ public interface ReportMapper {
 
     /**
      * 按模板查正式指标列表（确认界面/取数绑定的读入口）。
-     * 只返回"活"的指标：draft（待确认）+ confirmed（已确认）；deprecated 留痕行不返回（只查库可见）。
+     * 只返回"活"的指标：draft（待确认）+ confirmed（已确认）+ locked（M3-3 已绑定取数）；deprecated 留痕行不返回（只查库可见）。
      * 排序按 metric_code 字典序——编码统一 M%03d 零填充生成，字典序即数值序。
      *
      * @param templateId 模板 id
@@ -77,13 +77,14 @@ public interface ReportMapper {
 
     /**
      * 写入一条指标草稿（saveMetrics 整体替换时逐条调用）。
-     * 调用方负责：code 生成与查重、origin 映射、status 恒为 draft、version 取模板当前版本。
+     * 调用方负责：code 生成与查重、origin 映射、status 恒为 draft、version 取模板当前版本、
+     * ruleCode 白名单校验与 ruleVersion 权威取值（M3-3，均可空=未绑定）。
      *
-     * @param row 指标行（templateId/metricCode/metricName/unit/origin/status/version/specJson）
+     * @param row 指标行（templateId/metricCode/metricName/unit/origin/status/version/ruleCode/ruleVersion/specJson）
      * @return 影响行数（恒 1）；撞 uk(template_id, metric_code, version) 抛 DuplicateKeyException
      */
-    @Insert("INSERT INTO report_metrics(template_id, metric_code, metric_name, unit, origin, status, version, spec_json) " +
-            "VALUES(#{templateId}, #{metricCode}, #{metricName}, #{unit}, #{origin}, #{status}, #{version}, #{specJson})")
+    @Insert("INSERT INTO report_metrics(template_id, metric_code, metric_name, unit, origin, status, version, rule_code, rule_version, spec_json) " +
+            "VALUES(#{templateId}, #{metricCode}, #{metricName}, #{unit}, #{origin}, #{status}, #{version}, #{ruleCode}, #{ruleVersion}, #{specJson})")
     @Options(useGeneratedKeys = true, keyProperty = "id")
     int insertMetric(Map<String, Object> row);
 
@@ -146,4 +147,82 @@ public interface ReportMapper {
      */
     @Update("UPDATE report_metrics SET status='deprecated', updated_at=CURRENT_TIMESTAMP WHERE id=#{id} AND status='confirmed'")
     int deprecateMetric(@Param("id") long id);
+
+    // ==================== M3-3 指标取数绑定 ====================
+
+    /**
+     * 取数候选指标：confirmed（待取数即锁）+ locked（已绑定可取数）。
+     * 与 listMetricsByTemplate 的差别：不含 draft（未确认指标不参与取数）。
+     *
+     * @param templateId 模板 id
+     * @return 指标行列表（含 ruleCode/ruleVersion），按 metricCode 升序
+     */
+    @Select("SELECT id, template_id AS templateId, metric_code AS metricCode, metric_name AS metricName, " +
+            "unit, origin, status, version, formula, rule_code AS ruleCode, rule_version AS ruleVersion, " +
+            "spec_json AS specJson, created_at AS createdAt, updated_at AS updatedAt " +
+            "FROM report_metrics WHERE template_id=#{templateId} AND status IN ('confirmed','locked') ORDER BY metric_code")
+    List<Map<String, Object>> listUsableMetricsByTemplate(@Param("templateId") long templateId);
+
+    /**
+     * 取数即锁：把本次成功取数的 confirmed 指标批量流转为 locked。
+     * 守卫压 SQL 层（WHERE status='confirmed'）：已是 locked 的行不动，重复锁定幂等。
+     * locked 行从此不被 saveMetrics 整体替换删改（防"重存指标把已取数定义冲掉"）。
+     *
+     * @param ids 本次取数成功的 confirmed 指标 id 集（调用方保证非空）
+     * @return 流转条数
+     */
+    @Update("<script>UPDATE report_metrics SET status='locked', updated_at=CURRENT_TIMESTAMP " +
+            "WHERE status='confirmed' AND id IN " +
+            "<foreach collection='ids' item='mid' open='(' separator=',' close=')'>#{mid}</foreach></script>")
+    int lockConfirmedMetricsByIds(@Param("ids") List<Long> ids);
+
+    /**
+     * 落一条取数结果块。blockId 取 metricCode，靠 uk(instance_id, block_id) 防同实例重复块。
+     *
+     * @param row 块行（instanceId/blockId/metricCode/columnsJson/rowsJson/metaJson/hash）
+     * @return 影响行数（恒 1）
+     */
+    @Insert("INSERT INTO report_data_blocks(instance_id, block_id, metric_code, columns_json, rows_json, meta_json, hash) " +
+            "VALUES(#{instanceId}, #{blockId}, #{metricCode}, #{columnsJson}, #{rowsJson}, #{metaJson}, #{hash})")
+    int insertDataBlock(Map<String, Object> row);
+
+    /**
+     * failed 重试的清场半步：删掉该实例上次尝试留下的数据块（本次取数全部成功后才会再插入）。
+     *
+     * @param instanceId 实例 id
+     * @return 删除行数
+     */
+    @Delete("DELETE FROM report_data_blocks WHERE instance_id=#{instanceId}")
+    int deleteDataBlocksByInstance(@Param("instanceId") long instanceId);
+
+    /**
+     * 实例数据块列表（取数结果预览 / M3-4 长文生成与 M3-5 渲染的读入口）。
+     *
+     * @param instanceId 实例 id
+     * @return 块行列表，按 blockId 升序（= metricCode 字典序）
+     */
+    @Select("SELECT id, instance_id AS instanceId, block_id AS blockId, metric_code AS metricCode, " +
+            "columns_json AS columnsJson, rows_json AS rowsJson, meta_json AS metaJson, hash, created_at AS createdAt " +
+            "FROM report_data_blocks WHERE instance_id=#{instanceId} ORDER BY block_id")
+    List<Map<String, Object>> listDataBlocksByInstance(@Param("instanceId") long instanceId);
+
+    /**
+     * 写一条报告洞察（M3-3 只产 missing：指标未绑定取数规则，本期无数据；
+     * summary/threshold/rank/trend 留 M3-4 长文生成）。
+     *
+     * @param row 洞察行（instanceId/insightType/text/refsJson/severity）
+     * @return 影响行数（恒 1）
+     */
+    @Insert("INSERT INTO report_insights(instance_id, insight_type, text, refs_json, severity) " +
+            "VALUES(#{instanceId}, #{insightType}, #{text}, #{refsJson}, #{severity})")
+    int insertInsight(Map<String, Object> row);
+
+    /**
+     * failed 重试清场：只清 missing 型（M3-3 自产），不动将来 M3-4 生成的分析型洞察。
+     *
+     * @param instanceId 实例 id
+     * @return 删除行数
+     */
+    @Delete("DELETE FROM report_insights WHERE instance_id=#{instanceId} AND insight_type='missing'")
+    int deleteMissingInsightsByInstance(@Param("instanceId") long instanceId);
 }

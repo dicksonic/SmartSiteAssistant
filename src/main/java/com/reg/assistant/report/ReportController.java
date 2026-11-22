@@ -107,4 +107,20 @@ public class ReportController {
     public Object deprecateMetric(@RequestBody Map<String, Object> body, @PathVariable long id) {
         return reportService.deprecateMetric((String) body.get("token"), id);
     }
+
+    // ==================== M3-3 指标取数绑定 ====================
+    // 绑定：saveMetrics 行带 ruleCode（白名单校验，规则目录见 GET /rules）；
+    // 取数：start 从占位改为真取数（draft/failed → generating → preview），成功取数的 confirmed 指标"取数即锁"。
+
+    /** 取数规则目录（指标绑定下拉的数据源）：GET /api/report/rules?token=xx → 白名单规则数组 */
+    @GetMapping("/rules")
+    public Object rules(@RequestParam String token) {
+        return reportService.listRules(token);
+    }
+
+    /** 实例数据块（取数结果预览/渲染数据源）：GET /api/report/instances/{id}/blocks?token=xx → {id, blocks} */
+    @GetMapping("/instances/{id}/blocks")
+    public Object blocks(@RequestParam String token, @PathVariable long id) {
+        return reportService.listBlocks(token, id);
+    }
 }
